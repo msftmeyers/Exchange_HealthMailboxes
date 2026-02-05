@@ -1,22 +1,18 @@
-﻿<#
-.SYNOPSIS
-    Checks the number of required HealthMailboxes 
-    in your Exchange Organization and takes corrective actions, if wanted
+﻿###########################################################################################
+########################### Number of HealthMailboxes #####################################
+############################# and corrective actions  #####################################
+###########################################################################################
+#
+# Copyright - Steffen Meyer
+#
+# Change History
+# 03/09/2024 V1.0 Initial version
+# 04/09/2024 V1.1 elseif statement missing + Error/WarningAction handling
+# 02/05/2026 V1.2 changed duplicate mailboxes handling
+#
+###########################################################################################
 
-.EXAMPLE
-    .\healthmailboxes.ps1
-
-.AUTHOR
-    Steffen Meyer
-    Cloud Solution Architect
-    Microsoft Deutschland GmbH
-
-.VERSIONS
-    03/09/2024 V1.0 Initial version
-    04/09/2024 V1.1 elseif statement missing + Error/WarningAction handling
-#>
-
-$version = "1.1"
+$version = "1.2"
 
 write-host "----------------------------------------------------------------------------"
 write-host "|              This script will compare the number                         |"
@@ -120,7 +116,7 @@ if ($n -eq 2)
         
     if ($duplicates)
     {
-        $dupsum = $duplicates.count
+        $dupsum = ($duplicates| Measure-Object).count
         $duptodelete = ($duplicates | Measure-Object -sum count).sum - $dupsum
                 
         $removedup = Read-Host "`nNOTICE: We found $($duptodelete) duplicate mailboxes, continue to delete duplicate HealthMailboxes? ( Y / N )"
@@ -136,16 +132,20 @@ if ($n -eq 2)
             #Counter for progress bar
             $i = 0
 
-            ForEach ($duplicate in $duplicates)
+            ForEach ($dupgroup in $duplicates)
             {
                 #Progress bar
                 $i++
                 $status = "{0:N0}" -f ($i / $dupsum * 100)
                 Write-Progress -Activity "Removing duplicate HealthMailboxes..." -Status "Processing duplicate mailboxname $i of $dupsum : $status% Completed" -PercentComplete ($i / $dupsum * 100)
+                                
+                $dupmbxs = $dupgroup.group | foreach { Get-Mailbox -Monitoring $_.exchangeguid.guid -WarningAction SilentlyContinue -ErrorAction SilentlyContinue }
+                $dupmbxs = $dupmbxs | Sort-Object whencreated -Descending | Select-Object -Skip 1
 
-                #Duplicate mailbox removal
-                Get-Mailbox -Monitoring $duplicate.name -WarningAction SilentlyContinue -ErrorAction SilentlyContinue | Sort-Object whencreated -Descending | Select-Object -Skip 1 | Remove-Mailbox -confirm:$false
-                #Get-Mailbox -Monitoring $duplicate.name | Sort-Object whencreated -Descending | Select-Object -Skip 1 | Remove-Mailbox -whatif
+                foreach ($dupmbx in $dupmbxs)
+                {
+                    $dupremove = Remove-Mailbox $dupmbx.exchangeguid.guid -confirm:$false
+                }
             }
         Write-Progress -Completed -Activity "Done!"
         Write-Host "`nCleanup of duplicate HealthMailboxes done!" -ForegroundColor Green
@@ -194,8 +194,7 @@ if ($n -eq 2)
                 Write-Progress -Activity "Removing old/outdated HealthMailboxes..." -Status "Processing mailbox $i of $oldsum : $status% Completed" -PercentComplete ($i / $oldsum * 100)
 
                 #Old/outdated mailbox removal
-                Get-Mailbox -Monitoring $old -WarningAction SilentlyContinue -ErrorAction SilentlyContinue | Remove-Mailbox -confirm:$false
-                #Get-Mailbox -Monitoring $old | Remove-Mailbox -whatif
+                Get-Mailbox -Monitoring $old.exchangeguid.guid -WarningAction SilentlyContinue -ErrorAction SilentlyContinue | Remove-Mailbox -confirm:$false
             }
             Write-Progress -Completed -Activity "Done!"
             Write-Host "`nCleanup of old/outdated HealthMailboxes done!" -ForegroundColor Green
@@ -207,9 +206,9 @@ if ($n -eq 2)
     }
 }
 
-#Waiting 60 seconds for AD replication
-Write-Host "`nNOTICE: Waiting 60 seconds for AD replication..." -ForegroundColor Yellow
-Start-Sleep 60
+#Waiting 30 seconds for AD replication
+Write-Host "`nNOTICE: Waiting 30 seconds for AD replication..." -ForegroundColor Yellow
+Start-Sleep 30
 
 #Count again
 Write-Host "`nCounting HealthMailboxes again, this may take a while..." -ForegroundColor White
